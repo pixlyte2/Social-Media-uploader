@@ -1,13 +1,27 @@
-import express from "express";
-import { createCompanyWithAdmin } from "../controllers/superadminController.js";
-import { authMiddleware } from "../middlewares/authMiddleware.js";
+const express = require("express");
+
+const {
+  createCompanyWithAdmin,
+  getAllAdmins,
+  getAdminById,
+  updateAdmin,
+  deleteAdmin
+} = require("../controllers/superadminController");
+
+const authMiddleware = require("../middlewares/authMiddleware");
 
 const router = express.Router();
 
-router.post(
-  "/create-company",
-  authMiddleware(["SUPERADMIN"]),
-  createCompanyWithAdmin
-);
+// 🔥 Only SUPERADMIN access
+router.use(authMiddleware(["SUPERADMIN"]));
 
-export default router;
+// ROUTES
+router.post("/create-company", createCompanyWithAdmin);
+
+// ADMIN CRUD
+router.get("/admins", getAllAdmins);
+router.get("/admins/:id", getAdminById);
+router.put("/admins/:id", updateAdmin);
+router.delete("/admins/:id", deleteAdmin);
+
+module.exports = router;

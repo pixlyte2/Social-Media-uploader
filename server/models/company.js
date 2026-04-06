@@ -1,16 +1,19 @@
-import mongoose from "mongoose";
+const mongoose = require("mongoose");
 
-const companySchema = new mongoose.Schema({
-  name: String,
-  companyId: String,
-  adminId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "User"
+const companySchema = new mongoose.Schema(
+  {
+    name: String,
+    companyId: String,
+    adminId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User"
+    },
+    validityDays: Number,
+    validUntil: Date
   },
-  validityDays: Number,
-  validUntil: Date
-}, { timestamps: true });
+  { timestamps: true }
+);
 
 const Company = mongoose.model("Company", companySchema);
 
-export default Company;   // 🔥 MUST BE DEFAULT
+module.exports = Company;

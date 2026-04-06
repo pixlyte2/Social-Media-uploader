@@ -1,8 +1,8 @@
-import User from "../models/user";
-import bcrypt from "bcrypt";
+const User = require("../models/user");
+const bcrypt = require("bcrypt");
 
 // CREATE USER
-export const createUser = async (req, res) => {
+const createUser = async (req, res) => {
   const { name, email, password } = req.body;
 
   const hashed = await bcrypt.hash(password, 10);
@@ -19,7 +19,7 @@ export const createUser = async (req, res) => {
 };
 
 // GET USERS
-export const getUsers = async (req, res) => {
+const getUsers = async (req, res) => {
   const users = await User.find({
     companyId: req.user.companyId
   });
@@ -28,7 +28,7 @@ export const getUsers = async (req, res) => {
 };
 
 // UPDATE USER
-export const updateUser = async (req, res) => {
+const updateUser = async (req, res) => {
   const user = await User.findByIdAndUpdate(
     req.params.id,
     req.body,
@@ -39,8 +39,15 @@ export const updateUser = async (req, res) => {
 };
 
 // DELETE USER
-export const deleteUser = async (req, res) => {
+const deleteUser = async (req, res) => {
   await User.findByIdAndDelete(req.params.id);
 
   res.json({ msg: "User deleted" });
+};
+
+module.exports = {
+  createUser,
+  getUsers,
+  updateUser,
+  deleteUser
 };
