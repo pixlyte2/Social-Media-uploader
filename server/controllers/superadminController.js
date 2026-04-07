@@ -80,24 +80,68 @@ const getAdminById = async (req, res) => {
 };
 
 
-// ✅ UPDATE ADMIN
 const updateAdmin = async (req, res) => {
   try {
-    const { name, email } = req.body;
+    const { name, email, validityDays } = req.body;
 
+    // 🔹 Update Admin
     const admin = await User.findByIdAndUpdate(
       req.params.id,
       { name, email },
       { new: true }
     );
 
-    res.json(admin);
+    if (!admin) {
+      return res.status(404).json({ msg: "Admin not found" });
+    }
+
+    let updatedCompany = null;
+
+    // 🔥 Update validity
+    if (validityDays !== undefined) {
+      const company = await Company.findById(admin.companyId);
+
+      if (!company) {
+        return res.status(404).json({ msg: "Company not found" });
+      }
+
+      let newValidUntil;
+
+      // 🔥 FIX: force expire
+      if (validityDays === 0) {
+        newValidUntil = new Date(Date.now() - 1000);
+      } else {
+        const baseDate =
+          company.validUntil > new Date()
+            ? company.validUntil
+            : new Date();
+
+        baseDate.setDate(baseDate.getDate() + validityDays);
+        newValidUntil = baseDate;
+      }
+
+      company.validityDays = validityDays;
+      company.validUntil = newValidUntil;
+
+      updatedCompany = await company.save(); // ✅ FIX
+    }
+
+    res.json({
+      msg: "Admin updated successfully",
+      admin: {
+        _id: admin._id,
+        name: admin.name,
+        email: admin.email,
+        role: admin.role,
+        companyId: admin.companyId
+      },
+      company: updatedCompany
+    });
+
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
-
-
 // ✅ DELETE ADMIN
 const deleteAdmin = async (req, res) => {
   try {
