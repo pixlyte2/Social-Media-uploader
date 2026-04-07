@@ -9,7 +9,8 @@ const {
   getPosts,
   getPostById,
   updatePost,
-  deletePost
+  deletePost,
+  retryPost
 } = require("../controllers/postController");
 
 // 🔥 ADMIN + USER allowed
@@ -20,5 +21,8 @@ router.get("/:id", authMiddleware(["ADMIN", "USER"]), getPostById);
 
 router.put("/:id", authMiddleware(["ADMIN", "USER"]), updatePost);
 router.delete("/:id", authMiddleware(["ADMIN", "USER"]), deletePost);
+
+// 🔥 Manual retry
+router.post("/:id/retry", authMiddleware(["ADMIN", "USER"]), retryPost);
 
 module.exports = router;

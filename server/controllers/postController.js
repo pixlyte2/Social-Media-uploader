@@ -1,7 +1,6 @@
 const Post = require("../models/post");
 const queue = require("../queues/queue");
 
-// ✅ CREATE
 const createPost = async (req, res) => {
   try {
     const { caption, scheduledAt } = req.body;
@@ -10,14 +9,22 @@ const createPost = async (req, res) => {
       caption,
       filePath: req.file.path.replace(/\\/g, "/"),
       scheduledAt,
+      status: "PENDING",
       companyId: req.user.companyId
     });
+
+    const delay = Math.max(new Date(scheduledAt) - new Date(), 0);
 
     await queue.add(
       "publish-post",
       { postId: post._id },
       {
-        delay: new Date(scheduledAt) - new Date()
+        delay,
+        attempts: 3,
+        backoff: {
+          type: "exponential",
+          delay: 5000
+        }
       }
     );
 
@@ -98,10 +105,52 @@ const deletePost = async (req, res) => {
   }
 };
 
+
+const retryPost = async (req, res) => {
+  try {
+    const post = await Post.findById(req.params.id);
+
+    if (!post) {
+      return res.status(404).json({ msg: "Post not found" });
+    }
+
+    // 🔥 Only allow retry if FAILED
+    if (post.status !== "FAILED") {
+      return res.status(400).json({ msg: "Only failed posts can be retried" });
+    }
+
+    // 🔥 Reset values
+    post.status = "PENDING";
+    post.retryCount = 0;
+    post.lastError = null;
+
+    await post.save();
+
+    // 🔥 Push again to queue
+    await queue.add(
+      "publish-post",
+      { postId: post._id },
+      {
+        delay: 0, // immediate retry
+        attempts: 3
+      }
+    );
+
+    res.json({
+      msg: "Retry started",
+      post
+    });
+
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 module.exports = {
   createPost,
   getPosts,
   getPostById,
   updatePost,
-  deletePost
+  deletePost,
+  retryPost
 };

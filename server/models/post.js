@@ -7,8 +7,16 @@ const postSchema = new mongoose.Schema(
     scheduledAt: Date,
     status: {
       type: String,
-      enum: ["SCHEDULED", "PUBLISHED", "FAILED"],
-      default: "SCHEDULED"
+      enum: ["PENDING", "PROCESSING", "PUBLISHED", "FAILED"],
+      default: "PENDING"
+    },
+    retryCount: {
+      type: Number,
+      default: 0
+    },
+    lastError: {
+      type: String,
+      default: null
     },
     companyId: {
       type: mongoose.Schema.Types.ObjectId,
