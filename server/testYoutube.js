@@ -2,5 +2,5 @@ const { uploadToYouTube } = require("./services/youtubeService");
 
 uploadToYouTube({
   caption: "🔥 My Test Video",
-  filePath: "uploads/test.mp4"
+  filePath: "uploads/1775560152126.mp4"
 });

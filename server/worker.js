@@ -1,11 +1,25 @@
+const { Worker } = require("bullmq");
+const mongoose = require("mongoose");
+require("dotenv").config();
+
+const Post = require("./models/post");
+const { uploadToYouTube } = require("./services/youtubeService");
+
+// 🔥 DB connect
+mongoose.connect(process.env.MONGO_URI)
+  .then(() => console.log("MongoDB Connected (Worker)"))
+  .catch(err => console.log("DB Error:", err));
+
+// 🔥 Worker
 const worker = new Worker(
   "postQueue",
-  async job => {
+  async (job) => {
     const { postId } = job.data;
 
     const post = await Post.findById(postId);
     if (!post) return;
 
+    // 🔥 prevent duplicate
     if (post.status === "PUBLISHED" || post.status === "PROCESSING") return;
 
     try {
@@ -14,6 +28,7 @@ const worker = new Worker(
 
       console.log("Processing:", post.caption);
 
+      // 🔥 YouTube upload
       const videoId = await uploadToYouTube(post);
 
       post.youtubeVideoId = videoId;
@@ -40,7 +55,7 @@ const worker = new Worker(
       } else {
         const delay = 5000 * post.retryCount;
 
-        await post.save(); // 🔥 save first
+        await post.save();
 
         await job.queue.add("publish-post", {
           postId: post._id
@@ -57,3 +72,5 @@ const worker = new Worker(
     }
   }
 );
+
+console.log("Worker running...");

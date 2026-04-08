@@ -1,32 +1,50 @@
 const { google } = require("googleapis");
 const fs = require("fs");
 const path = require("path");
+require("dotenv").config();
 
+// 🔥 OAuth setup
 const oauth2Client = new google.auth.OAuth2(
-  "YOUR_CLIENT_ID",
-  "YOUR_CLIENT_SECRET",
-  "http://localhost:5000/oauth2callback"
+  process.env.YOUTUBE_CLIENT_ID,
+  process.env.YOUTUBE_CLIENT_SECRET,
+  process.env.YOUTUBE_REDIRECT_URI
 );
 
+// 🔥 ONLY refresh token use (BEST PRACTICE)
 oauth2Client.setCredentials({
-  access_token: "YOUR_ACCESS_TOKEN",
-  refresh_token: "YOUR_REFRESH_TOKEN"
+  refresh_token: process.env.YOUTUBE_REFRESH_TOKEN
 });
 
+// 🔥 AUTO TOKEN REFRESH (IMPORTANT)
+oauth2Client.on("tokens", (tokens) => {
+  if (tokens.access_token) {
+    console.log("🔄 New Access Token Generated");
+  }
+});
+
+// 🔥 YouTube API
 const youtube = google.youtube({
   version: "v3",
   auth: oauth2Client
 });
 
+// 🔥 Upload function
 const uploadToYouTube = async (post) => {
   try {
     const filePath = path.join(__dirname, "..", post.filePath);
+
+    // ✅ File check
+    if (!fs.existsSync(filePath)) {
+      throw new Error("File not found: " + filePath);
+    }
+
+    console.log("📤 Uploading to YouTube:", post.caption);
 
     const res = await youtube.videos.insert({
       part: "snippet,status",
       requestBody: {
         snippet: {
-          title: post.caption,
+          title: post.caption || "No Title",
           description: "Uploaded via SaaS"
         },
         status: {
@@ -43,7 +61,7 @@ const uploadToYouTube = async (post) => {
     return res.data.id;
 
   } catch (err) {
-    console.log("❌ Error:", err.message);
+    console.log("❌ YouTube Upload Error:", err.message);
     throw err;
   }
 };

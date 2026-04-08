@@ -142,6 +142,7 @@ const updateAdmin = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
 // ✅ DELETE ADMIN
 const deleteAdmin = async (req, res) => {
   try {
