@@ -10,6 +10,11 @@ const userSchema = new mongoose.Schema(
       enum: ["SUPERADMIN", "ADMIN", "USER"],
       default: "USER"
     },
+    // 🔥 NEW: permissions
+    permissions: {
+      type: [String],
+      default: []
+    },
     companyId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Company",

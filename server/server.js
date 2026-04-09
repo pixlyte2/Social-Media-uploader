@@ -8,7 +8,7 @@ const authRoutes = require("./routes/authRoutes");
 const superAdminRoutes = require("./routes/superadminRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const postRoutes = require("./routes/postRoutes");
-
+const youtubeRoutes = require("./routes/youtubeRoutes");
 // CONFIG
 dotenv.config();
 
@@ -26,6 +26,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/superadmin", superAdminRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/posts", postRoutes);
+app.use("/api/youtube", youtubeRoutes);
 
 // DB CONNECT
 connectDB();
