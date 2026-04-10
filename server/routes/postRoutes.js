@@ -11,7 +11,8 @@ const {
   getPostById,
   updatePost,
   deletePost,
-  retryPost
+  retryPost,
+  createBulkPosts
 } = require("../controllers/postController");
 
 /*
@@ -70,4 +71,12 @@ router.post(
   retryPost
 );
 
+// 🔥 BULK UPLOAD
+router.post(
+  "/bulk-create",
+  auth(),
+  checkPermission("create_post"),
+  upload.array("files", 10),
+  createBulkPosts
+);
 module.exports = router;

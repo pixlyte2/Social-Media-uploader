@@ -1,39 +1,137 @@
 const Post = require("../models/post");
 const queue = require("../queues/queue");
 
+
+const mongoose = require("mongoose");
+
+const moment = require("moment-timezone");
+
 const createPost = async (req, res) => {
   try {
-    const { caption, scheduledAt } = req.body;
+    const caption = req.body.caption;
+    const scheduledAt = req.body.scheduledAt;
+    const accountId = req.body.accountId;
+
+    const scheduledIST = moment.tz(scheduledAt, "Asia/Kolkata");
+
+    // 🔥🔥🔥 ADD THIS VALIDATION
+    if (scheduledIST.valueOf() <= Date.now()) {
+      return res.status(400).json({
+        msg: "❌ Please select a future time"
+      });
+    }
+
+    const delay = scheduledIST.valueOf() - Date.now();
+
+    console.log("🕒 Scheduled IST:", scheduledIST.format());
+    console.log("⏳ Delay (ms):", delay);
 
     const post = await Post.create({
       caption,
       filePath: req.file.path.replace(/\\/g, "/"),
-      scheduledAt,
+      scheduledAt: scheduledIST.toDate(),
+      accountId,
       status: "PENDING",
       companyId: req.user.companyId
     });
 
-    const delay = Math.max(new Date(scheduledAt) - new Date(), 0);
-
     await queue.add(
       "publish-post",
       { postId: post._id },
-      {
-        delay,
-        attempts: 3,
-        backoff: {
-          type: "exponential",
-          delay: 5000
-        }
-      }
+      { delay }
     );
 
     res.json(post);
+
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
 
+
+const createBulkPosts = async (req, res) => {
+  try {
+    console.log("📥 BULK BODY:", req.body);
+    console.log("📁 FILES COUNT:", req.files?.length);
+
+    const { caption, scheduledAt, accountId } = req.body;
+
+    if (!req.files || req.files.length === 0) {
+      console.log("❌ No files received");
+      return res.status(400).json({ msg: "No files uploaded" });
+    }
+
+    if (!accountId) {
+      console.log("❌ accountId missing");
+      return res.status(400).json({ msg: "accountId is required" });
+    }
+
+    const scheduledIST = moment.tz(scheduledAt, "Asia/Kolkata");
+
+    console.log("🕒 BASE SCHEDULE:", scheduledIST.format());
+
+    if (scheduledIST.valueOf() <= Date.now()) {
+      console.log("❌ Past time selected");
+      return res.status(400).json({
+        msg: "❌ Please select a future time"
+      });
+    }
+
+    const posts = [];
+
+    // 🔥 loop all files
+    for (let i = 0; i < req.files.length; i++) {
+      const file = req.files[i];
+
+      console.log(`\n📦 Processing File ${i + 1}/${req.files.length}`);
+      console.log("📁 File Name:", file.originalname);
+
+      // 🔥 stagger (5 min gap)
+      const scheduledTime = scheduledIST.clone().add(i * 5, "minutes");
+
+      const delay = scheduledTime.valueOf() - Date.now();
+
+      console.log("🕒 Scheduled Time:", scheduledTime.format());
+      console.log("⏳ Delay (ms):", delay);
+
+      const post = await Post.create({
+        caption: caption || `Video ${i + 1}`,
+        filePath: file.path.replace(/\\/g, "/"),
+        scheduledAt: scheduledTime.toDate(),
+        accountId,
+        status: "PENDING",
+        companyId: req.user.companyId
+      });
+
+      console.log("✅ Post Created ID:", post._id);
+
+      await queue.add(
+        "publish-post",
+        { postId: post._id },
+        { delay }
+      );
+
+      console.log("🚀 Job added to queue");
+
+      posts.push(post);
+    }
+
+    console.log("\n🎯 BULK UPLOAD COMPLETE");
+    console.log("📊 Total Posts:", posts.length);
+
+    res.json({
+      msg: "✅ Bulk upload scheduled",
+      total: posts.length,
+      posts
+    });
+
+  } catch (err) {
+    console.log("❌ BULK ERROR FULL:", err);
+    console.log("❌ ERROR MESSAGE:", err.message);
+
+    res.status(500).json({ error: err.message });
+  }
+};
 // ✅ GET ALL POSTS
 const getPosts = async (req, res) => {
   try {
@@ -148,6 +246,7 @@ const retryPost = async (req, res) => {
 
 module.exports = {
   createPost,
+  createBulkPosts,
   getPosts,
   getPostById,
   updatePost,

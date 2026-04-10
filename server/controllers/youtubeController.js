@@ -1,100 +1,147 @@
 const path = require("path");
-
-// 🔥 Load .env
 require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
 
 const { google } = require("googleapis");
 const SocialAccount = require("../models/SocialAccount");
 
-// 🔥 DEBUG ENV
-console.log("CLIENT ID:", process.env.YOUTUBE_CLIENT_ID);
-console.log("CLIENT SECRET:", process.env.YOUTUBE_CLIENT_SECRET);
-console.log("REDIRECT URI:", process.env.YOUTUBE_REDIRECT_URI);
 
-// ❗ DO NOT create global oauth2Client (temporary remove)
-// const oauth2Client = new google.auth.OAuth2(...);
-
-// 🔥 STEP 1: Generate URL
+// 🔥 STEP 1: Generate OAuth URL
 const connectYouTube = (req, res) => {
-    try {
-        const oauth2Client = new google.auth.OAuth2(
-            process.env.YOUTUBE_CLIENT_ID,
-            process.env.YOUTUBE_CLIENT_SECRET,
-            process.env.YOUTUBE_REDIRECT_URI
-        );
+  try {
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.YOUTUBE_CLIENT_ID,
+      process.env.YOUTUBE_CLIENT_SECRET,
+      process.env.YOUTUBE_REDIRECT_URI
+    );
 
-        const url = oauth2Client.generateAuthUrl({
-            access_type: "offline",
-            scope: ["https://www.googleapis.com/auth/youtube.upload"],
-            prompt: "consent"
-        });
+    // 🔥 pass user info safely
+    const state = Buffer.from(
+      JSON.stringify({
+        userId: req.user.id,
+        companyId: req.user.companyId
+      })
+    ).toString("base64");
 
-        console.log("✅ OAuth URL generated");
+    const url = oauth2Client.generateAuthUrl({
+      access_type: "offline",
+      scope: [
+        "https://www.googleapis.com/auth/youtube",
+        "https://www.googleapis.com/auth/youtube.upload"
+      ],
+      prompt: "consent",
+      state
+    });
 
-        res.json({ url });
+    console.log("✅ OAuth URL generated");
 
-    } catch (err) {
-        console.log("❌ CONNECT ERROR:", err);
-        res.status(500).json({ error: err.message });
-    }
+    res.json({ url });
+
+  } catch (err) {
+    console.log("❌ CONNECT ERROR:", err.message);
+    res.status(500).json({ error: err.message });
+  }
 };
 
-// 🔥 STEP 2: Callback
+
+// 🔥 STEP 2: CALLBACK
 const youtubeCallback = async (req, res) => {
-    try {
-        console.log("👉 CALLBACK HIT");
-        console.log("QUERY:", req.query);
+  try {
+    console.log("👉 CALLBACK HIT");
 
-        const code = req.query.code;
+    const code = req.query.code;
+    const stateRaw = req.query.state;
 
-        if (!code) {
-            console.log("❌ No code received");
-            return res.status(400).send("No code in query");
-        }
-
-        const oauth2Client = new google.auth.OAuth2(
-            process.env.YOUTUBE_CLIENT_ID,
-            process.env.YOUTUBE_CLIENT_SECRET,
-            process.env.YOUTUBE_REDIRECT_URI
-        );
-
-        console.log("👉 Exchanging code...");
-
-        const { tokens } = await oauth2Client.getToken(code);
-
-        console.log("✅ TOKENS RECEIVED:", tokens);
-
-        // ⚠️ TEMP FIX (since no authMiddleware)
-        const userId = "tempUser";
-        const companyId = "tempCompany";
-
-       await SocialAccount.findOneAndUpdate(
-  {
-    platform: "youtube"
-  },
-  {
-    platform: "youtube",
-    accessToken: tokens.access_token,
-    refreshToken: tokens.refresh_token,
-    expiryDate: tokens.expiry_date
-  },
-  { upsert: true, new: true }
-);
-
-        console.log("✅ TOKEN SAVED TO DB");
-
-        res.send("✅ YouTube Connected Successfully");
-
-    } catch (err) {
-        console.log("❌ CALLBACK ERROR FULL:", err);
-        console.log("❌ ERROR MESSAGE:", err.message);
-        console.log("❌ ERROR STACK:", err.stack);
-
-        res.status(500).send(err.message);
+    if (!code || !stateRaw) {
+      return res.status(400).send("Missing code/state");
     }
+
+    // 🔥 decode state
+    const state = JSON.parse(Buffer.from(stateRaw, "base64").toString());
+
+    const { userId, companyId } = state;
+
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.YOUTUBE_CLIENT_ID,
+      process.env.YOUTUBE_CLIENT_SECRET,
+      process.env.YOUTUBE_REDIRECT_URI
+    );
+
+    const { tokens } = await oauth2Client.getToken(code);
+
+    // 🔥 IMPORTANT
+    oauth2Client.setCredentials(tokens);
+
+    const youtube = google.youtube({
+      version: "v3",
+      auth: oauth2Client
+    });
+
+    // 🔥 GET CHANNEL
+    const channelRes = await youtube.channels.list({
+      part: "snippet",
+      mine: true
+    });
+
+    if (!channelRes.data.items.length) {
+      return res.status(400).send("No YouTube channel found");
+    }
+
+    const channel = channelRes.data.items[0];
+
+    console.log("🎯 CHANNEL:", channel.snippet.title);
+
+    // 🔥 SAVE ACCOUNT
+    await SocialAccount.findOneAndUpdate(
+      {
+        platform: "youtube",
+        channelId: channel.id,
+        companyId
+      },
+      {
+        userId,
+        companyId,
+        platform: "youtube",
+        channelId: channel.id,
+        channelName: channel.snippet.title,
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+        expiryDate: tokens.expiry_date
+      },
+      {
+        upsert: true,
+        returnDocument: "after"
+      }
+    );
+
+    console.log("✅ CHANNEL SAVED");
+
+    res.send("✅ YouTube Connected Successfully");
+
+  } catch (err) {
+    console.log("❌ CALLBACK ERROR:", err.message);
+    res.status(500).send(err.message);
+  }
 };
+
+
+// 🔥 GET CONNECTED ACCOUNTS
+const getChannels = async (req, res) => {
+  try {
+    const accounts = await SocialAccount.find({
+      companyId: req.user.companyId,
+      platform: "youtube"
+    }).select("_id channelName channelId");
+
+    res.json(accounts);
+
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 
 module.exports = {
-    connectYouTube,
-    youtubeCallback
+  connectYouTube,
+  youtubeCallback,
+  getChannels
 };
