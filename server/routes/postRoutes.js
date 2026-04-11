@@ -12,15 +12,10 @@ const {
   updatePost,
   deletePost,
   retryPost,
-  createBulkPosts
+  createBulkPosts,
+  createSmartBulkPosts,
+  getPostStatus
 } = require("../controllers/postController");
-
-/*
-🧠 FLOW:
-auth() → user verify
-checkPermission() → access control
-controller → execute logic
-*/
 
 // 🔥 CREATE POST
 router.post(
@@ -31,6 +26,32 @@ router.post(
   createPost
 );
 
+// 🔥 BULK UPLOAD
+router.post(
+  "/bulk-create",
+  auth(),
+  checkPermission("create_post"),
+  upload.array("files", 10),
+  createBulkPosts
+);
+
+// 🔥 SMART BULK
+router.post(
+  "/smart-bulk",
+  auth(),
+  checkPermission("create_post"),
+  upload.array("files", 20),
+  createSmartBulkPosts
+);
+
+// 🔥 STATUS (⚠️ BEFORE :id)
+router.get(
+  "/status",
+  auth(),
+  checkPermission("view_post"),
+  getPostStatus
+);
+
 // 🔥 GET ALL POSTS
 router.get(
   "/",
@@ -39,7 +60,7 @@ router.get(
   getPosts
 );
 
-// 🔥 GET SINGLE POST
+// 🔥 GET SINGLE POST (⚠️ LAST)
 router.get(
   "/:id",
   auth(),
@@ -71,12 +92,4 @@ router.post(
   retryPost
 );
 
-// 🔥 BULK UPLOAD
-router.post(
-  "/bulk-create",
-  auth(),
-  checkPermission("create_post"),
-  upload.array("files", 10),
-  createBulkPosts
-);
 module.exports = router;

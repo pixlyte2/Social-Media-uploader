@@ -4,6 +4,7 @@ require("dotenv").config();
 
 const Post = require("./models/post");
 const { uploadToYouTube } = require("./services/youtubeService");
+const { getTodayUploadCount } = require("./utils/quotaChecker");
 
 // 🔥 DB connect
 mongoose.connect(process.env.MONGO_URI)
@@ -21,90 +22,196 @@ const worker = new Worker(
       const post = await Post.findById(postId).lean();
 
       if (!post) {
-        console.log("⚠️ Post not found, skipping...");
+        console.log("⚠️ Post not found");
         return;
       }
 
-      console.log("📦 POST DATA:", post);
-      console.log("👉 accountId:", post.accountId);
+      // ⏳ TIME GUARD
+      if (post.scheduledAt && new Date(post.scheduledAt).getTime() > Date.now()) {
+        console.log("⏳ Not time yet, skipping...");
+        return;
+      }
 
-      // 🔥 VALIDATION
       if (!post.accountId) {
         console.log("❌ accountId missing");
         return;
       }
 
-      // 🔥 reload mongoose doc
-      const postDoc = await Post.findById(postId);
-      if (!postDoc) {
-        console.log("⚠️ Post not found (second check)");
+      // 🔥 LOCK SYSTEM (CRITICAL FIX)
+      const lockedPost = await Post.findOneAndUpdate(
+        {
+          _id: postId,
+          isLocked: false,
+          status: { $ne: "PUBLISHED" }
+        },
+        {
+          $set: {
+            status: "PROCESSING",
+            isLocked: true
+          }
+        },
+        { returnDocument: "after" }
+      );
+
+      if (!lockedPost) {
+        console.log("⛔ Already processing / locked");
         return;
       }
 
-      // 🔥 prevent duplicate processing
-      if (
-        postDoc.status === "PUBLISHED" ||
-        postDoc.status === "PROCESSING"
-      ) {
-        console.log("⚠️ Already processed, skipping...");
-        return;
-      }
+      console.log("🚀 Processing:", lockedPost.caption);
 
-      // 🔥 mark processing
-      postDoc.status = "PROCESSING";
-      await postDoc.save();
+      // 🔥 QUOTA CHECK
+      const todayCount = await getTodayUploadCount(post.companyId);
+      const DAILY_LIMIT = 8;
 
-      console.log("🚀 Processing:", postDoc.caption);
+      console.log("📊 Today uploaded:", todayCount);
 
-      // 🔥 YouTube upload
-      const videoId = await uploadToYouTube(post);
-
-      // 🔥 success update
-      postDoc.youtubeVideoId = videoId;
-      postDoc.status = "PUBLISHED";
-      postDoc.retryCount = 0;
-      postDoc.lastError = null;
-
-      await postDoc.save();
-
-      console.log("🎥 Uploaded:", videoId);
-      console.log("✅ Published:", postDoc.caption);
-
-    } catch (err) {
-      console.log("❌ Upload Error FULL:", err.message);
-
-      const postDoc = await Post.findById(postId);
-      if (!postDoc) {
-        console.log("⚠️ Post missing during error handling");
-        return;
-      }
-
-      postDoc.retryCount += 1;
-      postDoc.lastError = err.message;
-
-      console.log("❌ Failed:", postDoc.caption, "Retry:", postDoc.retryCount);
-
-      if (postDoc.retryCount >= 3) {
-        postDoc.status = "FAILED";
-        await postDoc.save();
-
-        console.log("💀 Final Failed:", postDoc.caption);
-      } else {
-        const delay = 5000 * postDoc.retryCount;
-
-        await postDoc.save();
-
-        console.log("🔁 Retrying after delay:", delay);
+      if (todayCount >= DAILY_LIMIT) {
+        console.log("🚫 Daily limit reached → retry tomorrow");
 
         await job.queue.add(
           "publish-post",
-          { postId: postDoc._id },
-          { delay }
+          { postId },
+          {
+            delay: 24 * 60 * 60 * 1000,
+            jobId: `retry-${postId}-${Date.now()}`
+          }
         );
+
+        await Post.updateOne(
+          { _id: postId },
+          {
+            $set: {
+              status: "PENDING",
+              lastError: "Daily limit reached",
+              isLocked: false
+            }
+          }
+        );
+
+        console.log("✅ STATUS → PENDING");
+        return;
       }
 
-      // ❌ IMPORTANT: DO NOT THROW AGAIN
-      // throw err;  ❌ removed
+      // 🔥 SMALL DELAY (avoid burst)
+      await new Promise(r => setTimeout(r, 2000));
+
+      // 🔥 UPLOAD
+      const videoId = await uploadToYouTube(post);
+
+      // 🔥 SUCCESS
+      await Post.updateOne(
+        { _id: postId },
+        {
+          $set: {
+            youtubeVideoId: videoId,
+            status: "PUBLISHED",
+            uploadedAt: new Date(),
+            retryCount: 0,
+            lastError: null,
+            isLocked: false
+          }
+        }
+      );
+
+      console.log("🎥 Uploaded:", videoId);
+      console.log("✅ Published:", lockedPost.caption);
+
+    } catch (err) {
+      console.log("❌ Upload Error:", err.message);
+
+      const postDoc = await Post.findById(postId);
+      if (!postDoc) return;
+
+       // 🔥 ADD HERE 👇
+  console.log("🔥 BEFORE UPDATE STATUS:", postDoc.status);
+
+  const errorMsg =
+    err?.response?.data?.error?.message || err.message;
+
+  console.log("❌ REAL ERROR:", errorMsg);
+
+      const errorMsg =
+        err?.response?.data?.error?.message || err.message;
+
+      console.log("❌ REAL ERROR:", errorMsg);
+
+
+
+      // 🔥 YOUTUBE LIMIT HANDLING
+      if (errorMsg.toLowerCase().includes("exceeded")) {
+        console.log("🚫 YouTube limit → retry tomorrow");
+
+        await job.remove(); // stop duplicate loop
+
+        await job.queue.add(
+          "publish-post",
+          { postId },
+          {
+            delay: 24 * 60 * 60 * 1000,
+            jobId: `retry-${postId}-${Date.now()}`
+          }
+        );
+
+        await Post.updateOne(
+          { _id: postId },
+          {
+            $set: {
+              status: "PENDING",
+              lastError: "Daily limit reached",
+              isLocked: false
+            }
+          }
+        );
+
+        console.log("✅ DB UPDATED → PENDING");
+
+        
+        return;
+      }
+
+      // 🔁 NORMAL RETRY
+      const retryCount = (postDoc.retryCount || 0) + 1;
+
+      if (retryCount >= 3) {
+        await Post.updateOne(
+          { _id: postId },
+          {
+            $set: {
+              status: "FAILED",
+              retryCount,
+              lastError: errorMsg,
+              isLocked: false
+            }
+          }
+        );
+
+        console.log("💀 Final Failed:", postDoc.caption);
+      } else {
+        const delay = 5000 * retryCount;
+
+        await Post.updateOne(
+          { _id: postId },
+          {
+            $set: {
+              retryCount,
+              lastError: errorMsg,
+              isLocked: false
+            }
+          }
+        );
+
+        await job.queue.add(
+          "publish-post",
+          { postId },
+          {
+            delay,
+            jobId: `retry-${postId}-${retryCount}`
+          }
+        );
+
+        console.log("🔁 Retrying in:", delay);
+      }
     }
   },
   {

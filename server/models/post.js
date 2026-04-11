@@ -31,7 +31,15 @@ const postSchema = new mongoose.Schema(
     companyId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Company"
-    }
+    },
+    uploadedAt: {
+  type: Date,
+  default: null
+},
+isLocked: {
+  type: Boolean,
+  default: false
+},
   },
   { timestamps: true }
 );

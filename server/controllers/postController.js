@@ -132,6 +132,142 @@ const createBulkPosts = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+
+const createSmartBulkPosts = async (req, res) => {
+  try {
+    const { caption, scheduledAt, accountId } = req.body;
+
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ msg: "No files uploaded" });
+    }
+
+    if (!accountId) {
+      return res.status(400).json({ msg: "accountId is required" });
+    }
+
+    const baseTime = moment.tz(scheduledAt, "Asia/Kolkata");
+
+    if (baseTime.valueOf() <= Date.now()) {
+      return res.status(400).json({
+        msg: "❌ Please select future time"
+      });
+    }
+
+    // 🔥 SETTINGS
+    const MAX_PER_DAY = 20; // YouTube safe
+    const GAP_MINUTES = 5; // delay gap
+
+    const posts = [];
+
+    for (let i = 0; i < req.files.length; i++) {
+      const file = req.files[i];
+
+      // 🔥 calculate day offset
+      const dayOffset = Math.floor(i / MAX_PER_DAY);
+
+      // 🔥 position inside the day
+      const positionInDay = i % MAX_PER_DAY;
+
+      // 🔥 final schedule time
+      const scheduledTime = baseTime
+        .clone()
+        .add(dayOffset, "days")
+        .add(positionInDay * GAP_MINUTES, "minutes");
+
+      const delay = Math.max(
+        scheduledTime.valueOf() - Date.now(),
+        0
+      );
+
+      console.log(`\n📦 Video ${i + 1}`);
+      console.log("📁 File:", file.originalname);
+      console.log("📅 Day Offset:", dayOffset);
+      console.log("⏰ Scheduled:", scheduledTime.format());
+      console.log("⏳ Delay:", delay);
+
+      const post = await Post.create({
+        caption: caption || `Video ${i + 1}`,
+        filePath: file.path.replace(/\\/g, "/"),
+        scheduledAt: scheduledTime.toDate(),
+        accountId,
+        status: "PENDING",
+        companyId: req.user.companyId
+      });
+
+      await queue.add(
+        "publish-post",
+        { postId: post._id },
+        { delay }
+      );
+
+      posts.push(post);
+    }
+
+    res.json({
+      msg: "🔥 Smart bulk scheduled",
+      total: posts.length,
+      posts
+    });
+
+  } catch (err) {
+    console.log("❌ SMART ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+
+const getPostStatus = async (req, res) => {
+  try {
+    const companyId = new mongoose.Types.ObjectId(req.user.companyId);
+
+    console.log("📊 STATUS FETCH:", companyId);
+
+    const stats = await Post.aggregate([
+      {
+        $match: { companyId }
+      },
+      {
+        $group: {
+          _id: "$status",
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const result = {
+      total: 0,
+      pending: 0,
+      processing: 0,
+      published: 0,
+      failed: 0,
+      progress: 0
+    };
+
+    stats.forEach(item => {
+      result.total += item.count;
+
+      if (item._id === "PENDING") result.pending = item.count;
+      if (item._id === "PROCESSING") result.processing = item.count;
+      if (item._id === "PUBLISHED") result.published = item.count;
+      if (item._id === "FAILED") result.failed = item.count;
+    });
+
+    result.progress =
+      result.total === 0
+        ? 0
+        : Math.round((result.published / result.total) * 100);
+
+    console.log("📊 RESULT:", result);
+
+    res.json(result);
+
+  } catch (err) {
+    console.log("❌ STATUS ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
 // ✅ GET ALL POSTS
 const getPosts = async (req, res) => {
   try {
@@ -247,6 +383,8 @@ const retryPost = async (req, res) => {
 module.exports = {
   createPost,
   createBulkPosts,
+  createSmartBulkPosts,
+  getPostStatus,
   getPosts,
   getPostById,
   updatePost,
