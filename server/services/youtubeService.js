@@ -6,6 +6,7 @@ const SocialAccount = require("../models/SocialAccount");
 // 🔥 UPLOAD VIDEO
 const uploadToYouTube = async (post) => {
   try {
+     throw new Error("The user has exceeded the number of videos they may upload.");
     console.log("📦 POST DATA:", post);
     console.log("👉 accountId:", post.accountId);
 

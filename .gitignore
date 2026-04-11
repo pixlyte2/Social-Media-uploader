@@ -1,6 +1,4 @@
-server/.env
-.env
-node_modules/
+
 
 # Node modules
 node_modules/

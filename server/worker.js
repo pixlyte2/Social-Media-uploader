@@ -37,7 +37,7 @@ const worker = new Worker(
         return;
       }
 
-      // 🔥 LOCK SYSTEM (CRITICAL FIX)
+      // 🔥 LOCK SYSTEM
       const lockedPost = await Post.findOneAndUpdate(
         {
           _id: postId,
@@ -69,15 +69,7 @@ const worker = new Worker(
       if (todayCount >= DAILY_LIMIT) {
         console.log("🚫 Daily limit reached → retry tomorrow");
 
-        await job.queue.add(
-          "publish-post",
-          { postId },
-          {
-            delay: 24 * 60 * 60 * 1000,
-            jobId: `retry-${postId}-${Date.now()}`
-          }
-        );
-
+        // ✅ UPDATE DB FIRST
         await Post.updateOne(
           { _id: postId },
           {
@@ -89,11 +81,23 @@ const worker = new Worker(
           }
         );
 
-        console.log("✅ STATUS → PENDING");
+        const updated = await Post.findById(postId);
+        console.log("🔥 AFTER UPDATE STATUS:", updated.status);
+
+        // ✅ THEN ADD RETRY
+        await job.queue.add(
+          "publish-post",
+          { postId },
+          {
+            delay: 24 * 60 * 60 * 1000,
+            jobId: `retry-${postId}-${Date.now()}`
+          }
+        );
+
         return;
       }
 
-      // 🔥 SMALL DELAY (avoid burst)
+      // 🔥 SMALL DELAY
       await new Promise(r => setTimeout(r, 2000));
 
       // 🔥 UPLOAD
@@ -123,36 +127,18 @@ const worker = new Worker(
       const postDoc = await Post.findById(postId);
       if (!postDoc) return;
 
-       // 🔥 ADD HERE 👇
-  console.log("🔥 BEFORE UPDATE STATUS:", postDoc.status);
-
-  const errorMsg =
-    err?.response?.data?.error?.message || err.message;
-
-  console.log("❌ REAL ERROR:", errorMsg);
+      console.log("🔥 BEFORE UPDATE STATUS:", postDoc.status);
 
       const errorMsg =
         err?.response?.data?.error?.message || err.message;
 
       console.log("❌ REAL ERROR:", errorMsg);
 
-
-
-      // 🔥 YOUTUBE LIMIT HANDLING
+      // 🔥 YOUTUBE LIMIT ERROR
       if (errorMsg.toLowerCase().includes("exceeded")) {
         console.log("🚫 YouTube limit → retry tomorrow");
 
-        await job.remove(); // stop duplicate loop
-
-        await job.queue.add(
-          "publish-post",
-          { postId },
-          {
-            delay: 24 * 60 * 60 * 1000,
-            jobId: `retry-${postId}-${Date.now()}`
-          }
-        );
-
+        // ✅ UPDATE FIRST
         await Post.updateOne(
           { _id: postId },
           {
@@ -164,9 +150,19 @@ const worker = new Worker(
           }
         );
 
-        console.log("✅ DB UPDATED → PENDING");
+        const updated = await Post.findById(postId);
+        console.log("🔥 AFTER UPDATE STATUS:", updated.status);
 
-        
+        // ✅ RETRY
+        await job.queue.add(
+          "publish-post",
+          { postId },
+          {
+            delay: 24 * 60 * 60 * 1000,
+            jobId: `retry-${postId}-${Date.now()}`
+          }
+        );
+
         return;
       }
 
